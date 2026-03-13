@@ -229,3 +229,268 @@ AUTHENTICATION_PENDING
 
 Webhook + Scheduler fallback (used with **Mastercard MPGS integrations).
 It prevents **lost payments and double processing**.
+
+
+Below is a **focused documentation of the REFUND flow** in **Mastercard Payment Gateway Services (MPGS)** using Hosted Checkout.
+
+The key idea: **refund happens only after a successful payment transaction exists**.
+
+---
+
+# MPGS Refund Flow (Step-by-Step)
+
+## 1️⃣ Successful Payment Must Exist
+
+Before a refund can happen, the order must already have a **successful payment transaction**.
+
+Typical earlier flow:
+
+```
+INITIATE_CHECKOUT
+      ↓
+Customer payment
+      ↓
+PURCHASE transaction
+      ↓
+Payment approved
+```
+
+You must know:
+
+* `order.id`
+* `transaction.id` (original payment)
+
+---
+
+# 2️⃣ Retrieve the Original Transaction
+
+First get the **transaction ID** using `RETRIEVE_ORDER`.
+
+### Request
+
+```bash
+curl -X POST "https://test-gateway.mastercard.com/api/nvp/version/70" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "apiOperation=RETRIEVE_ORDER" \
+  -d "apiUsername=merchant.TESTBOK000012" \
+  -d "apiPassword=YOUR_PASSWORD" \
+  -d "merchant=TESTBOK000012" \
+  -d "order.id=ORDER123"
+```
+
+### Example Response
+
+```
+result=SUCCESS
+order.id=ORDER123
+
+transaction[0].id=TXN_ABC123
+transaction[0].type=PAYMENT
+transaction[0].result=SUCCESS
+transaction[0].amount=100.00
+```
+
+Save:
+
+```
+TXN_ABC123
+```
+
+This is the **target transaction** for the refund.
+
+---
+
+# 3️⃣ Send Refund Request
+
+Use **`apiOperation=REFUND`**.
+
+### Request
+
+```bash
+curl -X POST "https://test-gateway.mastercard.com/api/nvp/version/70" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "apiOperation=REFUND" \
+  -d "apiUsername=merchant.TESTBOK000012" \
+  -d "apiPassword=YOUR_PASSWORD" \
+  -d "merchant=TESTBOK000012" \
+  -d "order.id=ORDER123" \
+  -d "transaction.targetTransactionId=TXN_ABC123" \
+  -d "transaction.amount=100.00" \
+  -d "transaction.currency=USD"
+```
+
+### Important Parameters
+
+| Parameter                         | Purpose                      |
+| --------------------------------- | ---------------------------- |
+| `transaction.targetTransactionId` | original payment transaction |
+| `transaction.amount`              | amount to refund             |
+| `transaction.currency`            | currency                     |
+
+---
+
+# 4️⃣ Refund Response
+
+Example response:
+
+```
+result=SUCCESS
+transaction.type=REFUND
+transaction.result=SUCCESS
+transaction.amount=100.00
+```
+
+This means:
+
+✅ Refund successfully processed.
+
+---
+
+# 5️⃣ Partial Refund Example
+
+Refund part of the amount.
+
+Example original payment:
+
+```
+100.00 USD
+```
+
+Refund:
+
+```bash
+transaction.amount=30.00
+```
+
+Remaining refundable amount:
+
+```
+70.00 USD
+```
+
+Multiple partial refunds are allowed until the total equals the original payment.
+
+---
+
+# 6️⃣ Refund Flow Diagram
+
+```
+Customer Payment
+      │
+      ▼
+PURCHASE transaction created
+      │
+      ▼
+Merchant retrieves order
+      │
+      ▼
+Merchant sends REFUND request
+      │
+      ▼
+Gateway creates REFUND transaction
+      │
+      ▼
+Funds returned to card
+```
+
+---
+
+# 7️⃣ Refund Transaction Structure
+
+After refund, the order will have **multiple transactions**:
+
+```
+transaction[0] = PAYMENT
+transaction[1] = REFUND
+```
+
+Example:
+
+```
+transaction[0].type=PAYMENT
+transaction[0].amount=100
+
+transaction[1].type=REFUND
+transaction[1].amount=100
+```
+
+---
+
+# 8️⃣ Important Rules
+
+Refund rules in MPGS:
+
+| Rule                                 | Explanation              |
+| ------------------------------------ | ------------------------ |
+| Refund requires original transaction | Must reference payment   |
+| Cannot exceed original amount        | Max = payment amount     |
+| Currency must match                  | Same as original payment |
+| Refund creates a new transaction     | Does not modify original |
+
+---
+
+# 9️⃣ Common Errors
+
+### Invalid operation
+
+```
+interaction.operation=REFUND
+```
+
+❌ Invalid in checkout.
+
+Refund must use:
+
+```
+apiOperation=REFUND
+```
+
+---
+
+### Missing target transaction
+
+```
+transaction.targetTransactionId missing
+```
+
+Refund will fail.
+
+---
+
+# 🔟 Complete Refund Flow
+
+```
+1. Customer pays
+2. Payment approved
+3. Merchant retrieves order
+4. Merchant sends REFUND request
+5. Gateway processes refund
+6. Refund transaction created
+7. Funds returned to customer
+```
+
+---
+
+💡 **Integration tip**
+
+Production systems normally store:
+
+```
+order.id
+transaction.id
+amount
+currency
+status
+```
+
+This makes **refund operations very easy to trigger later**.
+
+---
+
+If you want, I can also show you the **three refund architectures used in real payment systems**:
+
+1️⃣ **Direct refund (MPGS API)**
+2️⃣ **Back-office refund (merchant portal)**
+3️⃣ **Automated refund service (microservice)**
+
+The **third one is what large fintech systems use.**
