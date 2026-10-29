@@ -5,3 +5,16 @@
 !.env.example
 !.env.sample
 !.env.template
+
+# --- security hardening: never commit env files or editor/tooling dirs ---
+.vscode/
+.claude/
+
+# security hardening: env + editor dirs
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.vscode/
+.claude/
